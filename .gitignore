@@ -116,3 +116,5 @@ outputs/
 .DS_Store
 aist_plusplus_final/
 aistplusplus_api/
+SMPL/SMPL_python_v.1.1.0/smpl/smpl_webuser/
+.DS_Store
