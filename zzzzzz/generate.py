@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 """
-inference.py
-
 This script loads a trained FACT model checkpoint (from a directory of checkpoints),
 runs auto-regressive inference to generate a long 3D dance sequence (outputting 219D frames),
 converts each frame to a SMPL compatible 75D representation (3 global translation and 72 axis angle parameters),
@@ -15,10 +13,9 @@ import numpy as np
 import tensorflow as tf
 import librosa   # <-- ADDED for audio feature extraction
 from scipy.spatial.transform import Rotation as R
-
-# ... (rest of your code remains unchanged)
+import additional_features
 # ---------------------------------------------------------------------------------------
-# GPU Memory Configuration (Optional)
+# GPU Memory Configuration 
 # ---------------------------------------------------------------------------------------
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
@@ -32,14 +29,14 @@ if gpus:
         print(e)
 
 # ---------------------------------------------------------------------------------------
-# Helper: Get a unique filename if the file already exists
+# Get a unique filename if the file already exists
 # ---------------------------------------------------------------------------------------
 def get_unique_filename(base_path):
     """
-    Given a base file path, if the file exists, return a new path
+    If the file exists, return a new path
     by appending an underscore and a number before the extension.
     For example, if "generated_motion.pkl" exists, it returns
-    "generated_motion_1.pkl", then "generated_motion_2.pkl", etc.
+    "generated_motion_1.pkl", then "generated_motion_2.pkl"
     """
     if not os.path.exists(base_path):
         return base_path
@@ -52,7 +49,7 @@ def get_unique_filename(base_path):
     return new_path
 
 # ---------------------------------------------------------------------------------------
-# FACT Model Definition (same as your training code)
+# FACT Model 
 # ---------------------------------------------------------------------------------------
 class PositionalEncoding(tf.keras.layers.Layer):
     def __init__(self, d_model, max_len=5000):
@@ -153,21 +150,39 @@ class FACTModel(tf.keras.Model):
 # ---------------------------------------------------------------------------------------
 # Define auto-regressive inference function
 # ---------------------------------------------------------------------------------------
-def infer_auto_regressive(model, inputs, steps=1200):
+def infer_auto_regressive(model, inputs, steps=1200, future_frame_index=10, temperature=0.0):
     """
-    Runs auto-regressive inference using the model.
-    Starting from a seed motion, it iteratively generates one frame at a time.
-    Returns a tensor of shape (BATCH_SIZE, steps, motion_dim).
+    Auto‑regressive inference that uses a selected future frame and optional noise.
+
+    Args:
+      model: the trained FACT model.
+      inputs: dictionary with "motion_input" and "audio_input".
+      steps: total number of frames to generate.
+      future_frame_index: index of the predicted frame to use from the model's output.
+                           (For example, if the model predicts 20 frames, using index 10 may capture mid‑term dynamics.)
+      temperature: standard deviation of Gaussian noise to add (set to 0.0 for no noise).
+
+    Returns:
+      A tensor of generated motion frames with shape [batch_size, steps, motion_feature_dim].
     """
     motion_input = inputs["motion_input"]
     generated_frames = []
     for i in range(steps):
         current_audio_input = inputs["audio_input"]
         output = model({"audio_input": current_audio_input, "motion_input": motion_input}, training=False)
-        # Take the first frame of the output as the new frame
-        new_frame = output[:, 0:1, :]
+        # Ensure that the output has enough frames; if not, fall back to the first frame.
+        if output.shape[1] > future_frame_index:
+            new_frame = output[:, future_frame_index:future_frame_index+1, :]
+        else:
+            new_frame = output[:, 0:1, :]
+
+        # Optionally add noise for temperature sampling.
+        if temperature > 0.0:
+            noise = tf.random.normal(shape=tf.shape(new_frame), mean=0.0, stddev=temperature)
+            new_frame = new_frame + noise
+
         generated_frames.append(new_frame)
-        # Update seed motion: remove first frame, append new frame
+        # Update seed motion: remove the oldest frame and append the new frame.
         motion_input = tf.concat([motion_input[:, 1:, :], new_frame], axis=1)
     generated = tf.concat(generated_frames, axis=1)
     return generated
@@ -326,23 +341,45 @@ def main(args):
     latest_ckpt = tf.train.latest_checkpoint(args.checkpoint_dir)
     if latest_ckpt is None:
         raise ValueError("No checkpoint found in " + args.checkpoint_dir)
-    model.load_weights(latest_ckpt)
+    model.load_weights(latest_ckpt).expect_partial()
     print("Loaded checkpoint:", latest_ckpt)
     status = model.load_weights(latest_ckpt)
-    status.expect_partial()  # This tells TensorFlow that it's okay if some variables are missing.
-    print("Loaded checkpoint with partial restoration (as expected).")
+    status.expect_partial()  # Skip loading of optimizer weights
+    print("Loaded checkpoint with partial restoration (as expected).")  
         
     # Run auto-regressive inference to generate motion
-    generated = infer_auto_regressive(model, inputs, steps=steps)  # shape: (BATCH_SIZE, steps, 219)
+    generated = generated = infer_auto_regressive(model, inputs, steps=args.steps, future_frame_index=10, temperature=0.01)
+ 
     generated_np = generated.numpy()[0]  # get first sample; shape: (steps, 219)
     print(f"Generated motion shape: {generated_np.shape}")
     
     # Convert each generated frame from 219D to SMPL-compatible 75D
     converted_frames = np.stack([convert_219_to_75(generated_np[t]) for t in range(generated_np.shape[0])], axis=0)
-    
-    # Prepare SMPL data dictionary
+
+    # Add post-processing to fix tangled joints
+    print("Applying post-processing to ensure biologically plausible motion...")
+
+    # 1. Separate translation and poses
     smpl_trans = converted_frames[:, :3]
     smpl_poses = converted_frames[:, 3:]
+
+    # 2. Apply temporal smoothing to reduce jitter
+    print("Applying temporal smoothing...")
+    smpl_poses = additional_features.smooth_motion(smpl_poses, window_size=7)
+    smpl_trans = additional_features.smooth(smpl_trans, window_size=11)  # Smoother for global translation
+
+    # 3. Apply anatomical joint limits
+    print("Enforcing anatomical joint limits...")
+    smpl_poses = additional_features.apply_joint_limits(smpl_poses)
+
+    # 4. Verify skeletal consistency
+    print("Verifying skeletal consistency...")
+    is_consistent = additional_features.verify_bone_lengths(smpl_poses)
+    if not is_consistent:
+        print("Warning: Motion may contain inconsistent poses. Applying additional smoothing.")
+        smpl_poses = additional_features.smooth_motion(smpl_poses, window_size=11)
+
+    # 5. Recombine for output
     smpl_scaling = np.array([1.0], dtype=np.float32)
     smpl_data = {
         "smpl_trans": smpl_trans,

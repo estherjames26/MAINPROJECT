@@ -1,6 +1,8 @@
 import os
 import numpy as np
 import tensorflow as tf
+from keras.layers import BatchNormalization
+import addons_training as at
 
 # ---------------------------------------------------------------------------------------
 # 1. GPU Memory Configuration (Optional)
@@ -22,6 +24,7 @@ if gpus:
 # ---------------------------------------------------------------------------------------
 TFRECORD_DIR = r"C:\Users\kemij\Programming\MAINPROJECT\mint\data"
 TRAIN_FILE_PATTERN = os.path.join(TFRECORD_DIR, "aist_tfrecord-train-*")
+VAL_FILE_PATTERN = os.path.join(TFRECORD_DIR, "aist_tfrecord-testval-*")  # Add this line
 
 BATCH_SIZE = 1      # Reduce if you get OOM
 EPOCHS = 100
@@ -76,40 +79,49 @@ def random_crop_or_truncate(audio_seq, motion_seq):
 # ---------------------------------------------------------------------------------------
 # 4. Build Dataset
 # ---------------------------------------------------------------------------------------
-files = tf.data.Dataset.list_files(TRAIN_FILE_PATTERN)
-
-dataset = files.interleave(
-    lambda x: tf.data.TFRecordDataset(x),
-    cycle_length=4, block_length=16
-)
-dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.AUTOTUNE)
-
-# Randomly shuffle files
-dataset = dataset.shuffle(buffer_size=100)
-
-# Crop/truncate sequences to at most MAX_SEQ_LEN
-dataset = dataset.map(random_crop_or_truncate, num_parallel_calls=tf.data.AUTOTUNE)
-
-# We know from your data that audio has 35 features, motion has 219
-# so we pad to (None, 35) and (None, 219)
-dataset = dataset.padded_batch(
-    BATCH_SIZE, 
-    padded_shapes=([None, 35], [None, 219])
-)
-dataset = dataset.prefetch(tf.data.AUTOTUNE)
-
-# Inspect first batch to confirm shapes
-for audio_seq, motion_seq in dataset.take(1):
-    AUDIO_DIM = audio_seq.shape[-1]   # Should be 35
-    MOTION_DIM = motion_seq.shape[-1] # Should be 75
-    print(f"audio_seq shape: {audio_seq.shape}, motion_seq shape: {motion_seq.shape}")
-    break
-
-# Pack as dict for the model
 def pack_inputs(audio, motion):
     return {"audio_input": audio, "motion_input": motion}, motion
 
-dataset = dataset.map(pack_inputs)
+def build_dataset(file_pattern, batch_size, shuffle=True):
+    """Build a dataset from TFRecord files."""
+    files = tf.data.Dataset.list_files(file_pattern)
+    
+    dataset = files.interleave(
+        lambda x: tf.data.TFRecordDataset(x),
+        cycle_length=4, block_length=16
+    )
+    dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.AUTOTUNE)
+    
+    # Shuffle if required (usually for training data)
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=100)
+    
+    # Crop/truncate sequences to at most MAX_SEQ_LEN
+    dataset = dataset.map(random_crop_or_truncate, num_parallel_calls=tf.data.AUTOTUNE)
+    
+    # Pad to consistent dimensions
+    dataset = dataset.padded_batch(
+        batch_size, 
+        padded_shapes=([None, 35], [None, 219])
+    )
+    
+    # Pack as dict for the model
+    dataset = dataset.map(pack_inputs)
+    
+    # Prefetch for performance
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    
+    return dataset
+
+
+train_dataset = build_dataset(TRAIN_FILE_PATTERN, BATCH_SIZE, shuffle=True)
+val_dataset = build_dataset(VAL_FILE_PATTERN, BATCH_SIZE, shuffle=False)  # No need to shuffle validation
+
+# Inspect first batch to confirm shapes
+for (inputs, targets) in train_dataset.take(1):
+    print(f"Audio input shape: {inputs['audio_input'].shape}")
+    print(f"Motion input shape: {inputs['motion_input'].shape}")
+    print(f"Target shape: {targets.shape}")
 
 # ---------------------------------------------------------------------------------------
 # 5. FACT Model Definition
@@ -135,6 +147,7 @@ class TransformerEncoderLayer(tf.keras.layers.Layer):
         self.mha = tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=d_model)
         self.ffn = tf.keras.Sequential([
             tf.keras.layers.Dense(dff, activation='relu'),
+            BatchNormalization(),  # Add this line
             tf.keras.layers.Dense(d_model)
         ])
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -145,7 +158,7 @@ class TransformerEncoderLayer(tf.keras.layers.Layer):
         attn_output = self.mha(query=x, value=x, key=x, attention_mask=mask)
         attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(x + attn_output)
-        ffn_output = self.ffn(out1)
+        ffn_output = self.ffn(out1, training=training)  # Add training flag
         ffn_output = self.dropout2(ffn_output, training=training)
         return self.layernorm2(x + ffn_output)
 
@@ -156,6 +169,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         self.mha2 = tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=d_model)
         self.ffn = tf.keras.Sequential([
             tf.keras.layers.Dense(dff, activation='relu'),
+            BatchNormalization(),  # Add this line
             tf.keras.layers.Dense(d_model)
         ])
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -176,7 +190,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         out2 = self.layernorm2(out1 + attn2)
 
         # FFN
-        ffn_output = self.ffn(out2)
+        ffn_output = self.ffn(out2, training=training)  # Move this line here and add training flag
         ffn_output = self.dropout3(ffn_output, training=training)
         return self.layernorm3(out2 + ffn_output)
 
@@ -232,13 +246,44 @@ class CustomCheckpoint(tf.keras.callbacks.ModelCheckpoint):
         if (epoch + 1) % 25 == 0:
             super(CustomCheckpoint, self).on_epoch_end(epoch, logs)
 
+class TrainingMonitor(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch % 10 == 0:
+            print(f"\nEpoch {epoch} summary:")
+            print(f"Loss: {logs['loss']:.4f}")
+            if 'val_loss' in logs:
+                print(f"Validation Loss: {logs['val_loss']:.4f}")
+            
+            # Sample prediction for monitoring
+            for inputs, targets in train_dataset.take(1):
+                predictions = self.model.predict(inputs)
+                
+                # Check for NaNs or extreme values
+                has_nan = np.isnan(predictions).any()
+                max_val = np.max(np.abs(predictions))
+                
+                if has_nan:
+                    print("WARNING: NaN values detected in predictions!")
+                if max_val > 10:
+                    print(f"WARNING: Large values in predictions: {max_val:.2f}")
+                    
+                print(f"Prediction shape: {predictions.shape}, Max value: {max_val:.2f}")
+                break
 
+# Add this to your callbacks list
+monitor_callback = TrainingMonitor()
 # Instantiate and compile your model as usual
+optimizer = tf.keras.optimizers.Adam(
+    learning_rate=1e-4,
+    clipnorm=1.0  # Clip gradients to prevent explosion
+)
+
+# Use the custom loss function from addons_training
 model = FACTModel(audio_dim=35, motion_dim=219, d_model=256, num_heads=8,
                   num_encoder_layers=4, num_decoder_layers=4, dff=512, dropout_rate=0.1)
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
-    loss='mse'
+    optimizer=optimizer,
+    loss=at.custom_loss  # Use the imported custom loss function
 )
 
 # Define your checkpoint callback (here we save every epoch, or you could customize)
@@ -263,12 +308,30 @@ else:
     initial_epoch = 0
 
 # Continue training for additional epochs
-additional_epochs = 200 # HERE TO CHANGE HOW MANY ARE TRAINED in 1 SESSION 
+additional_epochs = 25 # HERE TO CHANGE HOW MANY ARE TRAINED in 1 SESSION 
 total_epochs = initial_epoch + additional_epochs
 
+# Add early stopping to prevent overfitting
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=20,  # Stop after 20 epochs of no improvement
+    restore_best_weights=True,
+    verbose=1
+)
+
+# Update your callbacks list
+callbacks = [
+    checkpoint_callback,
+    tensorboard_callback,
+    monitor_callback,
+    early_stopping  # Add early stopping
+]
+
+# Train with validation
 history = model.fit(
-    dataset,
+    train_dataset,
+    validation_data=val_dataset,
     epochs=total_epochs,
     initial_epoch=initial_epoch,
-    callbacks=[checkpoint_callback, tensorboard_callback]
+    callbacks=callbacks
 )
