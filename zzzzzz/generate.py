@@ -9,8 +9,8 @@ from fact_model import FACTModel
 # --- CONFIG ---
 AUDIO_PATH = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\dataset\wav_npy_35d\mBR0.npy"
 SEED_MOTION_PATH = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\dataset\motion_219d\gBR_sBM_cAll_d04_mBR0_ch01.npy"
-CHECKPOINT = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\checkpoints\cp-0150.ckpt"
-EXPORT_PATH = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\output\generated_autoreg_smpl150.pkl"
+CHECKPOINT = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\checkpoints\cp-3000.ckpt"
+EXPORT_PATH = r"C:\Users\kemij\Programming\MAINPROJECT\zzzzzz\output\generated_autoreg_smpl3000.pkl"
 AUDIO_DIM = 35
 MOTION_DIM = 75
 SEQ_LEN = 240
