@@ -1,5 +1,3 @@
-# FACT Model Components (Modularized)
-
 import tensorflow as tf
 import numpy as np
 
@@ -38,7 +36,7 @@ class TransformerEncoderLayer(tf.keras.layers.Layer):
         ffn = self.drop2(self.ffn(x), training=training)
         return self.norm2(x + ffn)
 
-# === Transformer Decoder Layer ===
+# === Transformer Decoder Layer with Causal Masking ===
 class TransformerDecoderLayer(tf.keras.layers.Layer):
     def __init__(self, d_model, heads, dff, dropout=0.1):
         super().__init__()
@@ -56,7 +54,7 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         self.drop3 = tf.keras.layers.Dropout(dropout)
 
     def call(self, x, enc_out, training):
-        attn1 = self.drop1(self.mha1(x, x, x), training=training)
+        attn1 = self.drop1(self.mha1(x, x, x, use_causal_mask=True), training=training)
         x1 = self.norm1(x + attn1)
         attn2 = self.drop2(self.mha2(x1, enc_out, enc_out), training=training)
         x2 = self.norm2(x1 + attn2)
@@ -65,21 +63,25 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
 
 # === FACT Model ===
 class FACTModel(tf.keras.Model):
-    def __init__(self, audio_dim=35, motion_dim=219, d_model=256, heads=4, dff=512, num_enc=2, num_dec=2):
+    def __init__(self, audio_dim=36, motion_dim=75, d_model=128, heads=2, dff=256, num_enc=3, num_dec=3, dropout_rate=0.1):
         super().__init__()
         self.d_model = d_model
         self.audio_proj = tf.keras.layers.Dense(d_model)
         self.audio_pos = PositionalEncoding(d_model)
         self.motion_proj = tf.keras.layers.Dense(d_model)
         self.motion_pos = PositionalEncoding(d_model)
+        dropout = dropout_rate
 
-        self.encoder = [TransformerEncoderLayer(d_model, heads, dff) for _ in range(num_enc)]
-        self.decoder = [TransformerDecoderLayer(d_model, heads, dff) for _ in range(num_dec)]
+        self.encoder = [TransformerEncoderLayer(d_model, heads, dff, dropout) for _ in range(num_enc)]
+        self.decoder = [TransformerDecoderLayer(d_model, heads, dff, dropout) for _ in range(num_dec)]
         self.output_layer = tf.keras.layers.Dense(motion_dim)
 
     def call(self, inputs, training=False):
         audio_input = inputs["audio_input"]
         motion_input = inputs["motion_input"]
+
+        if "beat" in inputs:
+            audio_input = tf.concat([audio_input, inputs["beat"]], axis=-1)
 
         audio_encoded = self.audio_pos(self.audio_proj(audio_input))
         for enc in self.encoder:
