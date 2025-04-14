@@ -3,12 +3,13 @@ import os
 import numpy as np
 import pickle
 import random
+import librosa
 from typing import List, Dict, Tuple, Any, Optional
 from motion_stitcher.main.features import compute_motion_compatibility
 
 class MotionStitcher:
     """System for stitching together motion clips to create choreography."""
-    
+
     def __init__(self, config, database=None):
         self.config = config
         self.database = database
@@ -16,70 +17,70 @@ class MotionStitcher:
     def stitch_choreography(self, audio_path, num_dancers, target_duration=None, style=None):
         """Create a choreography by stitching motion clips to match audio."""
         print(f"Creating choreography for {num_dancers} dancers with audio: {audio_path}")
-        
-        # Basic audio duration estimate (will be improved later)
+
         audio_features = self._extract_audio_features(audio_path)
-        
+        beat_times = audio_features.get("beat_times", [])
+        duration = audio_features.get("duration", 60)
+
         if target_duration is None:
-            target_duration = int(audio_features.get('duration', 60) * 30)  # 30 fps
+            target_duration = int(duration * 30)  # 30 fps
             print(f"Target duration set to {target_duration} frames")
-        
-        # Get clips that match the dancer count
+
+        beat_frames = [int(t * 30) for t in beat_times if t * 30 < target_duration]
+        if not beat_frames:
+            beat_frames = list(range(0, target_duration, 30))
+            print("No beat timings detected, using uniform 30fps intervals.")
+
         clip_ids = self.database.filter_clips(dancer_count=num_dancers)
         if not clip_ids:
             print(f"No clips found with {num_dancers} dancers")
             return None
-        
-        # Filter by style if specified
+
         if style:
             filtered_clips = []
             for clip_id in clip_ids:
                 clip, meta = self.database.get_clip(clip_id)
                 if meta.get('style') == style:
                     filtered_clips.append(clip_id)
-            
             if filtered_clips:
                 clip_ids = filtered_clips
                 print(f"Filtered to {len(clip_ids)} clips with style: {style}")
-        
-        # Start with a random clip
+
         current_clip_id = random.choice(clip_ids)
         current_clip_data, _ = self.database.get_clip(current_clip_id)
-        
-        # Extract motion data from current clip (may be dictionary or numpy array)
         current_clip = self._extract_motion_data(current_clip_data)
-        
-        # Initialize the choreography with the first clip
-        choreography = current_clip.copy()
 
-        # Warn if expected group format is not matched
+        choreography = current_clip.copy()
         if num_dancers > 1 and choreography.ndim != 3:
             print("⚠️ Warning: Expected group choreography, but got solo motion format!")
-        
-        # Stitch until target duration reached
+
         current_frame = choreography.shape[0] if num_dancers == 1 else choreography.shape[1]
-        
-        while current_frame < target_duration:
-            # Find compatible next clip
+        beat_index = 1
+
+        while beat_index < len(beat_frames) and current_frame < target_duration:
+            target_frame = beat_frames[beat_index]
+            beat_index += 1
+            frames_needed = target_frame - current_frame + 30
+            if frames_needed <= 0:
+                continue
+
             next_clip_id, next_clip = self._find_compatible_clip(current_clip, clip_ids, num_dancers)
-            
             if next_clip is None:
                 print("No compatible clip found, ending choreography")
                 break
-            
-            # Stitch the next clip
+
             choreography, overlap = self._stitch_clips(choreography, next_clip, num_dancers)
-            
             current_frame = choreography.shape[0] if num_dancers == 1 else choreography.shape[1]
             print(f"Stitched clip {next_clip_id} at frame {current_frame-overlap}, new length: {current_frame}")
-        
+
         print(f"Choreography created with {current_frame} frames")
-        
-        # Add metadata
+
         metadata = {
             'audio_path': audio_path,
             'num_dancers': num_dancers,
-            'style': style
+            'style': style,
+            'beat_times': beat_times,
+            'duration': duration
         }
 
         smpl_poses = choreography
@@ -93,12 +94,15 @@ class MotionStitcher:
         }
 
     def _extract_audio_features(self, audio_path):
-        """Extract basic duration from the audio file."""
         try:
-            return {'duration': 60}
+            y, sr = librosa.load(audio_path, sr=22050)
+            duration = librosa.get_duration(y=y, sr=sr)
+            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+            beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+            return {'duration': duration, 'beat_times': beat_times.tolist()}
         except Exception as e:
             print(f"Error extracting audio features: {e}")
-            return {'duration': 60}
+            return {'duration': 60, 'beat_times': []}
 
     def _extract_motion_data(self, motion_data):
         try:
@@ -115,8 +119,6 @@ class MotionStitcher:
             return None
 
     def _find_compatible_clip(self, current_clip, clip_ids, num_dancers):
-        
-
         best_clip_id = None
         best_clip = None
         best_score = -1
