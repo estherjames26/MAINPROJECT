@@ -28,6 +28,7 @@ def download_from_url(url):
 
     print(output_path)
 
+
 if __name__ == '__main__':
     args = sys.argv[1:]
     if len(args) != 1:
