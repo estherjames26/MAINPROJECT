@@ -82,14 +82,24 @@ class MotionFeatureExtractor:
         self.step_size = step_size
     
     def extract_windows(self, motion_sequence):
-        seq_length = motion_sequence.shape[0]
+        """
+        motion_sequence: 
+        • solo:    (frames, feats)
+        • group:  (num_persons, frames, feats)
+        """
         windows = []
-        
-        for start_idx in range(0, seq_length - self.window_size, self.step_size):
-            end_idx = start_idx + self.window_size
-            window = motion_sequence[start_idx:end_idx]
-            windows.append(window)
-        
+        # multi‐dancer
+        if motion_sequence.ndim == 3:
+            dancers, seq_len, feats = motion_sequence.shape
+            for start in range(0, seq_len - self.window_size, self.step_size):
+                win = motion_sequence[:, start:start + self.window_size, :]  # (dancers, window, feats)
+                windows.append(win)
+        else:
+            # your old 2‑D logic
+            seq_length = motion_sequence.shape[0]
+            for start in range(0, seq_length - self.window_size, self.step_size):
+                end = start + self.window_size
+                windows.append(motion_sequence[start:end])
         return windows
     
     def compute_velocity(self, motion_sequence):

@@ -22,9 +22,13 @@ class MotionStitcher:
         beat_times = audio_features.get("beat_times", [])
         duration = audio_features.get("duration", 60)
 
+        MAX_DURATION_FRAMES = 450  # 15 seconds at 30 FPS
         if target_duration is None:
-            target_duration = int(duration * 30)  # 30 fps
-            print(f"Target duration set to {target_duration} frames")
+            target_duration = MAX_DURATION_FRAMES
+            #print(f"Target duration not provided. Using max duration: {target_duration} frames")
+        else:
+            target_duration = min(target_duration, MAX_DURATION_FRAMES)
+            print(f"Target duration capped to {target_duration} frames")
 
         beat_frames = [int(t * 30) for t in beat_times if t * 30 < target_duration]
         if not beat_frames:
