@@ -1,5 +1,3 @@
-# evaluate_models_limited.py
-
 import os
 import pickle
 import numpy as np
@@ -10,7 +8,7 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-# --- CONFIGURATION: adjust these paths if needed ---
+
 from motion_stitcher.main.config import (
     CHOREOGRAPHY_DIR,
     AIST_MOTION_DIR,
@@ -18,18 +16,14 @@ from motion_stitcher.main.config import (
     AIOZ_DIR
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Which clips to evaluate
-# ──────────────────────────────────────────────────────────────────────────────
+
 test_clips = {
-    1: ['mBR0', 'mBR1', 'mBR2', 'mBR3', 'mBR4'],                   # AIST solo IDs
+    1: ['mBR0', 'mHO0', 'mJBO', 'mJS0', 'mKR0'],                   # AIST solo IDs
     2: ['1-vFCrO-fuM_01_9_1110','2EhlnKTJ1vo_02_0_407','3DnbGX7dWLQ_01_41_1500'],  # AIOZ 2‑d IDs
     3: ['-4yoUMiBwXg_01_0_960','-FXdDRM4lC0_01_22_900','06aOlKUkZCs_01_0_1290'],  # AIOZ 3‑d IDs
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Metric functions
-# ──────────────────────────────────────────────────────────────────────────────
 def euclidean_distance(gt, gen):
     n = min(gt.shape[0], gen.shape[0])
     return float(np.linalg.norm(gt[:n] - gen[:n], axis=1).mean())
@@ -52,9 +46,8 @@ def frechet_inception_distance(gt_feats, gen_feats):
         cov_prod = cov_prod.real
     return float(np.sum((mu_gt - mu_g)**2) + np.trace(cov_gt + cov_g - 2 * cov_prod))
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Build ground‑truth lookup maps for your PKL files on disk
-# ──────────────────────────────────────────────────────────────────────────────
+# Build ground‑truth lookup maps for PKL files on disk
+
 gt_map = {1: {}, 2: {}, 3: {}}
 
 # 1‑dancer: match any AIST PKL containing "_<clipID>_" 
@@ -73,15 +66,14 @@ for d in (2,3):
         if os.path.exists(path):
             gt_map[d][cid] = path
 
-# ──────────────────────────────────────────────────────────────────────────────
+
 # Evaluation loop
-# ──────────────────────────────────────────────────────────────────────────────
+
 records = []
 for fname in sorted(os.listdir(CHOREOGRAPHY_DIR)):
     if not fname.endswith('.pkl'):
         continue
 
-    # ← Replace your old split‐unpack with this:
     base = fname[:-4]
     parts = base.split('_')
     tag = parts[-1]
@@ -134,9 +126,8 @@ for fname in sorted(os.listdir(CHOREOGRAPHY_DIR)):
         'fid': fid
     })
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Summarize & print
-# ──────────────────────────────────────────────────────────────────────────────
+
+# Summarise & print
 df = pd.DataFrame(records)
 
 # 1) Per-clip results
