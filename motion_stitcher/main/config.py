@@ -1,4 +1,4 @@
-"""Configuration settings for the motion stitching system."""
+# Configuration settings for the motion stitching system 
 import os
 
 # Define base directory
@@ -20,7 +20,7 @@ AUDIO_INPUT_DIR = os.path.join(BASE_DIR, "audio_input")
 
 # Create directories if they don't exist
 def create_directories():
-    """Create necessary output directories"""
+    #Create necessary output directories
     directories = [
         OUTPUT_DIR,
         DATABASE_DIR,

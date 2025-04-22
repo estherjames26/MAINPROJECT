@@ -1,4 +1,4 @@
-"""Script to build the motion database from datasets."""
+#Script to build the motion database from datasets AIST++ and AIOZ
 import os
 import numpy as np
 import glob
@@ -7,7 +7,7 @@ from database import MotionDatabase
 import config
 
 def load_aist_data():
-    """Load motion data from AIST++ dataset."""
+    # Load motion data from AIST++ dataset
     print("Processing AIST++ dataset for solo dancers...")
     
     motion_dir = config.AIST_MOTION_DIR
@@ -22,7 +22,7 @@ def load_aist_data():
     
     clips = []
     
-    # Process each motion file
+    # Processes each motion file
     for i, motion_file in enumerate(motion_files):
         try:
             # Load motion data
@@ -55,7 +55,7 @@ def load_aist_data():
     return clips
 
 def load_aioz_data():
-    """Load motion data from AIOZ dataset."""
+    #Load motion data from AIOZ dataset
     print("Processing AIOZ dataset for group dancers...")
     
     motion_dir = os.path.join(config.AIOZ_DIR, 'motions_smpl')
@@ -99,7 +99,7 @@ def load_aioz_data():
     return clips
 
 def build_database():
-    """Build the motion database for AIST++ and AIOZ datasets"""
+    #Build the motion database for AIST++ and AIOZ datasets
     print("Building motion database...")
     
     # Create the database
@@ -120,12 +120,12 @@ def build_database():
     print(f"Database built with {len(aist_clips)} solo clips and {len(aioz_clips)} group clips")
     print(f"Saved to: {db_path}")
     
-    # Build separate databases for different dancer counts
+
     print("Building separate databases for different dancer counts...")
     build_dancer_specific_databases(aist_clips, aioz_clips)
 
 def build_dancer_specific_databases(aist_clips, aioz_clips):
-    """Build separate databases for different dancer counts"""
+    # Builds separate databases for different dancer counts
     # Define dancer counts to process
     dancer_counts = [1, 2, 3]
     

@@ -1,52 +1,80 @@
 import os
-import sys
 import numpy as np
 from typing import List, Tuple, Dict
-
-# ensure project root on sys.path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+from sklearn.cluster import KMeans
 
 from motion_stitcher.main.database import MotionDatabase
+from motion_stitcher.main.features import MotionFeatureExtractor
+
+__all__ = ['build_transition_dataset']
 
 
-def load_category_sequences(db: MotionDatabase) -> List[List[str]]:
+def build_transition_dataset(
+    db: MotionDatabase,
+    n_clusters: int = 10,
+    window_size: int = 60,
+    step_size: int = 30
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, int]]:
     """
-    Extracts all category sequences from the database metadata.
-    Each entry in metadata['categories'] should be a list of strings.
-    """
-    sequences: List[List[str]] = []
-    for clip_id in db.get_all_clips():
-        meta = db.metadata.get(clip_id, {})
-        cats = meta.get('categories')
-        if isinstance(cats, list) and len(cats) > 1:
-            sequences.append(cats)
-    return sequences
-
-
-def build_transition_dataset(db: MotionDatabase) -> Tuple[np.ndarray, np.ndarray, Dict[str,int]]:
-    """
-    Build X, y for next-category classification:
-    - X: one-hot encoding of current category
-    - y: index of next category
+    Build X, y for next-state classification via KMeans clustering of motion windows:
+    - Extract fixed windows from each clip
+    - Flatten and cluster into n_clusters states
+    - Assign cluster labels back into db.metadata['categories']
+    - Create one-hot X from current cluster, y from next cluster
     Returns (X, y, cat2idx).
     """
-    sequences = load_category_sequences(db)
-    if not sequences:
-        raise ValueError("No category sequences found in DB metadata.")
+    # Extract windows per clip
+    extractor = MotionFeatureExtractor(window_size=window_size, step_size=step_size)
+    windows_by_clip: Dict[str, List[np.ndarray]] = {}
+    for clip_id in db.get_all_clips():
+        clip_data, _ = db.get_clip(clip_id)
+        if isinstance(clip_data, dict) and 'smpl_poses' in clip_data:
+            motion = clip_data['smpl_poses']
+        elif isinstance(clip_data, dict) and 'motion' in clip_data:
+            motion = clip_data['motion']
+        elif isinstance(clip_data, np.ndarray):
+            motion = clip_data
+        else:
+            continue
+        windows = extractor.extract_windows(motion)
+        if windows:
+            windows_by_clip[clip_id] = windows
 
-    # collect unique categories
+    # Flatten windows for clustering
+    flat_windows = []
+    clip_window_counts = []
+    for clip_id, windows in windows_by_clip.items():
+        clip_window_counts.append(len(windows))
+        for w in windows:
+            flat_windows.append(w.flatten())
+    if not flat_windows:
+        raise ValueError("No motion windows found for clustering.")
+    X_feat = np.vstack(flat_windows)
+
+    # Cluster into motion states
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    labels = kmeans.fit_predict(X_feat)
+
+    # Assign labels back into sequences and metadata
+    sequences: List[List[str]] = []
+    idx = 0
+    for clip_id, count in zip(windows_by_clip.keys(), clip_window_counts):
+        seq_labels = [str(l) for l in labels[idx: idx + count]]
+        sequences.append(seq_labels)
+        # Inject into metadata
+        if clip_id not in db.metadata:
+            db.metadata[clip_id] = {}
+        db.metadata[clip_id]['categories'] = seq_labels
+        idx += count
+
+    # Build transition dataset
     cats = sorted({c for seq in sequences for c in seq})
     cat2idx = {c: i for i, c in enumerate(cats)}
 
-    X_list: List[np.ndarray] = []
-    y_list: List[int] = []
-    n_cat = len(cats)
-
+    X_list, y_list = [], []
     for seq in sequences:
         for a, b in zip(seq, seq[1:]):
-            xi = np.zeros(n_cat, dtype=int)
+            xi = np.zeros(len(cats), dtype=int)
             xi[cat2idx[a]] = 1
             X_list.append(xi)
             y_list.append(cat2idx[b])
@@ -54,6 +82,3 @@ def build_transition_dataset(db: MotionDatabase) -> Tuple[np.ndarray, np.ndarray
     X = np.vstack(X_list)
     y = np.array(y_list, dtype=int)
     return X, y, cat2idx
-
-
-__all__ = ['load_category_sequences', 'build_transition_dataset']

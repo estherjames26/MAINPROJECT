@@ -1,4 +1,4 @@
-"""Database for storing and retrieving motion clips."""
+# Database for storing and retrieving motion clips."""
 import os
 import joblib
 import numpy as np
@@ -6,7 +6,7 @@ import random
 
 class MotionDatabase:
     def __init__(self, database_path, config=None):
-        """Initialise the motion database."""
+       # Initialise the motion database
         self.database_path = database_path
         self.config = config
         self.clips = {}
@@ -17,7 +17,7 @@ class MotionDatabase:
         os.makedirs(os.path.dirname(database_path), exist_ok=True)
     
     def load(self):
-        """Load the database from disk."""
+        #Load the database from disk
         if os.path.exists(self.database_path):
             try:
                 data = joblib.load(self.database_path)
@@ -34,7 +34,7 @@ class MotionDatabase:
             return False
     
     def save(self):
-        """Save the database to disk."""
+        #Save the database to disk
         try:
             data = {
                 'clips': self.clips,
@@ -48,7 +48,7 @@ class MotionDatabase:
             return False
     
     def add_clip(self, clip_id, motion_data, metadata=None):
-        """Add a motion clip to the database."""
+        #Add a motion clip to the  corresponding database
         if clip_id in self.clips:
             print(f"Warning: Overwriting existing clip {clip_id}")
         
@@ -58,17 +58,17 @@ class MotionDatabase:
         return True
     
     def get_clip(self, clip_id):
-        """Retrieve a motion clip and its metadata from the database."""
+        #Retrieves a motion clip and its metadata from the database
         clip = self.clips.get(clip_id)
         meta = self.metadata.get(clip_id, {})
         return clip, meta
     
     def get_all_clips(self):
-        """Get all clip IDs and basic info."""
+        #Get all clip IDs and basic info
         return self.clips.keys()
     
     def get_random_clip(self):
-        """Get a random clip from the database."""
+        # Get a random clip from the database
         if not self.clips:
             return None, None
         
@@ -76,7 +76,7 @@ class MotionDatabase:
         return clip_id, self.clips[clip_id]
     
     def get_clips_info(self):
-        """Get basic info about all clips."""
+        #Get basic info about all clips
         info = {}
         for clip_id in self.clips:
             clip = self.clips[clip_id]
@@ -139,7 +139,7 @@ class MotionDatabase:
         return info
     
     def filter_clips(self, dancer_count=None):
-        """Get clips matching criteria."""
+        #Get clips based on dancer count
         results = []
         
         for clip_id, clip in self.clips.items():

@@ -1,21 +1,21 @@
-"""Motion stitching system for creating dance choreography."""
+# Motion stitching system for creating dance choreography
 import os
 import numpy as np
 import pickle
-import random
+import random 
 import librosa
 from typing import List, Dict, Tuple, Any, Optional
 from motion_stitcher.main.features import compute_motion_compatibility
 
 class MotionStitcher:
-    """System for stitching together motion clips to create choreography."""
+    #System for stitching together motion clips to create choreography
 
     def __init__(self, config, database=None):
         self.config = config
         self.database = database
 
     def stitch_choreography(self, audio_path, num_dancers, target_duration=None, style=None):
-        """Create a choreography by stitching motion clips to match audio."""
+        #Create a choreography by stitching motion clips to match audio
         print(f"Creating choreography for {num_dancers} dancers with audio: {audio_path}")
 
         audio_features = self._extract_audio_features(audio_path)
@@ -50,13 +50,15 @@ class MotionStitcher:
                 clip_ids = filtered_clips
                 print(f"Filtered to {len(clip_ids)} clips with style: {style}")
 
+
+        # Randomly select a starting clip as a seed motion
         current_clip_id = random.choice(clip_ids)
         current_clip_data, _ = self.database.get_clip(current_clip_id)
         current_clip = self._extract_motion_data(current_clip_data)
 
         choreography = current_clip.copy()
         if num_dancers > 1 and choreography.ndim != 3:
-            print("⚠️ Warning: Expected group choreography, but got solo motion format!")
+            print("Warning: Expected group choreography, but got solo motion format")
 
         current_frame = choreography.shape[0] if num_dancers == 1 else choreography.shape[1]
         beat_index = 1
