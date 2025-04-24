@@ -22,7 +22,7 @@ class MotionStitcher:
         beat_times = audio_features.get("beat_times", [])
         duration = audio_features.get("duration", 60)
 
-        MAX_DURATION_FRAMES = 450  # 15 seconds at 30 FPS
+        MAX_DURATION_FRAMES = 900 
         if target_duration is None:
             target_duration = MAX_DURATION_FRAMES
             #print(f"Target duration not provided. Using max duration: {target_duration} frames")
@@ -30,10 +30,10 @@ class MotionStitcher:
             target_duration = min(target_duration, MAX_DURATION_FRAMES)
             print(f"Target duration capped to {target_duration} frames")
 
-        beat_frames = [int(t * 30) for t in beat_times if t * 30 < target_duration]
+        beat_frames = [int(t * 60) for t in beat_times if t * 60 < target_duration]
         if not beat_frames:
-            beat_frames = list(range(0, target_duration, 30))
-            print("No beat timings detected, using uniform 30fps intervals.")
+            beat_frames = list(range(0, target_duration, 60))
+            print("No beat timings detected, using uniform 60fps intervals.")
 
         clip_ids = self.database.filter_clips(dancer_count=num_dancers)
         if not clip_ids:
@@ -55,6 +55,15 @@ class MotionStitcher:
         current_clip_id = random.choice(clip_ids)
         current_clip_data, _ = self.database.get_clip(current_clip_id)
         current_clip = self._extract_motion_data(current_clip_data)
+        MAX_START_FRAMES = 60
+        if num_dancers == 1:
+            # solo: motion shape = (frames, features)
+            if current_clip.shape[0] > MAX_START_FRAMES:
+                current_clip = current_clip[:MAX_START_FRAMES]
+        else:
+            # group: motion shape = (dancers, frames, features)
+            if current_clip.shape[1] > MAX_START_FRAMES:
+                current_clip = current_clip[:, :MAX_START_FRAMES, :]
 
         choreography = current_clip.copy()
         if num_dancers > 1 and choreography.ndim != 3:
@@ -78,8 +87,10 @@ class MotionStitcher:
             choreography, overlap = self._stitch_clips(choreography, next_clip, num_dancers)
             current_frame = choreography.shape[0] if num_dancers == 1 else choreography.shape[1]
             print(f"Stitched clip {next_clip_id} at frame {current_frame-overlap}, new length: {current_frame}")
-
+        
         print(f"Choreography created with {current_frame} frames")
+        
+        
 
         metadata = {
             'audio_path': audio_path,

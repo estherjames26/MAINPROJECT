@@ -9,6 +9,7 @@ BASE_DIR = r"C:\Users\kemij\Programming\MAINPROJECT\motion_stitcher"
 AIST_MOTION_DIR = os.path.join(BASE_DIR, "data", "AIST", "motions")
 AIST_WAV_DIR = os.path.join(BASE_DIR, "data", "AIST", "wav")
 AIOZ_DIR = os.path.join(BASE_DIR, "data", "AIOZ")
+AIST_DIR=os.path.join(BASE_DIR, "data", "AIST")
 
 # Output directories
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")

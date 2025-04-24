@@ -1,15 +1,11 @@
 # file for stitching ensemble system
-import os
-import pickle
-import joblib
-import random
-import numpy as np
-from typing import Optional
+import os, pickle, joblib, random, numpy as np, csv, sys
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import GridSearchCV
-import sys
+
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -20,6 +16,27 @@ from motion_stitcher.main.database import MotionDatabase
 from motion_stitcher.main.stitcher import MotionStitcher, compute_motion_compatibility
 from motion_stitcher.main.classification_stitcher import build_transition_dataset
 from motion_stitcher.main.features import MotionFeatureExtractor
+
+def save_param_comparison(model_name, default_model, tuned_model, output_csv):
+    default_params = default_model.get_params()
+    tuned_params = tuned_model.get_params()
+
+    rows = []
+    for param in sorted(default_params.keys()):
+        def_val = default_params[param]
+        tuned_val = tuned_params.get(param, def_val)
+        rows.append({
+            "model": model_name,
+            "parameter": param,
+            "default": def_val,
+            "tuned": tuned_val
+        })
+
+    with open(output_csv, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=["model", "parameter", "default", "tuned"])
+        if f.tell() == 0:  # write header if file is empty
+            writer.writeheader()
+        writer.writerows(rows)
 
 def train_hyper_ensemble(
     db_name: str, out_model: str, rf_params: dict = {'n_estimators': [100, 200, 300]}, svm_params: dict = {'C': [0.1, 1, 10]}, cv: int = 3):
@@ -65,6 +82,13 @@ def train_hyper_ensemble(
     os.makedirs(os.path.dirname(out_model), exist_ok=True)
     joblib.dump(ensemble, out_model)
     print(f"Saved ensemble -> {out_model}")
+    # Save param comparison to CSV
+    csv_out_path = os.path.join(config.BASE_DIR, 'model_param_comparison.csv')
+
+    save_param_comparison("RandomForest", RandomForestClassifier(), rf, csv_out_path)
+    save_param_comparison("SVM", SVC(probability=True), svm, csv_out_path)
+    save_param_comparison("KNN", KNeighborsClassifier(), knn, csv_out_path)
+
 
 
 class EnsembleStitcher(MotionStitcher):
@@ -167,6 +191,8 @@ def generate_ensemble_choreography(audio_path, num_dancers, target_duration) :
     return out_path
 
 
+
+
 if __name__ == "__main__":
     for d in (1,2,3):
         print(f"Training ensemble for {d}-dancer…")
@@ -174,3 +200,6 @@ if __name__ == "__main__":
             db_name   = f"{d}_dancer_db.pkl",
             out_model = os.path.join(config.BASE_DIR, 'models', f'ensemble_{d}.pkl')
         )
+    # Save param comparison to CSV
+    csv_out_path = os.path.join(config.BASE_DIR, 'model_param_comparison.csv')
+
