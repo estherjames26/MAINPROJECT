@@ -16,8 +16,7 @@ from motion_stitcher.main.ensemble import generate_ensemble_choreography as gene
 # Windows constant to suppress console windows
 if os.name == 'nt':
     CREATE_NO_WINDOW = 0x08000000
-else:
-    CREATE_NO_WINDOW = 0
+
 
 class App(tk.Tk):
     def __init__(self):
@@ -83,7 +82,7 @@ class App(tk.Tk):
             self.log(f"Downloaded and converted to WAV: {wav}")
 
             self.log("Generating choreography...")
-            pkl = generate_choreography(audio_path=wav, num_dancers=dancers)
+            pkl = generate_choreography(audio_path=wav, num_dancers=dancers, target_duration=900)
             if not pkl:
                 self.log("Error: Choreography generation failed.")
                 return
@@ -114,7 +113,8 @@ class App(tk.Tk):
         self.log(f"Selected WAV: {wav}")
         try:
             self.log("Generating choreography...")
-            pkl = generate_choreography(audio_path=wav, num_dancers=dancers)
+            target_duration = 900  # or any other value suitable for your choreography
+            pkl = generate_choreography(audio_path=wav, num_dancers=dancers, target_duration=target_duration)
             if not pkl:
                 self.log("Error: Choreography generation failed.")
                 return
